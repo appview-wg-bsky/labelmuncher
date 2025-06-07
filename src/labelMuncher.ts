@@ -53,6 +53,9 @@ export class LabelMuncher {
 
 		const schema = Deno.env.get("BSKY_DB_POSTGRES_SCHEMA") || "bsky";
 
+		const plcUrl = Deno.env.get("BSKY_DID_PLC_URL") || Deno.env.get("DID_PLC_URL") ||
+			"https://plc.directory";
+
 		const labelerDidsEnv = Deno.env.get("BSKY_LABELS_FROM_ISSUER_DIDS");
 		if (!labelerDidsEnv) {
 			throw new Error("BSKY_LABELS_FROM_ISSUER_DIDS environment variable is required");
@@ -92,6 +95,7 @@ export class LabelMuncher {
 			labelerDids,
 			modServiceDid,
 			sqlitePath,
+			plcUrl,
 		});
 	}
 

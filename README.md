@@ -12,6 +12,7 @@ A service to ingest labels from atproto labelers into the Bluesky AppView.
 ### Optional
 
 - `BSKY_DB_POSTGRES_SCHEMA`: PostgreSQL schema to use (defaults to `bsky`)
+- `BSKY_DID_PLC_URL`/`DID_PLC_URL`: URL of the PLC directory to use (defaults to `https://plc.directory`)
 - `DB_PATH`: Path to SQLite database file (defaults to `./muncher-state.sqlite`)
 - `MOD_SERVICE_DID`: If you want to accept takedowns from a moderation service, set this to the DID
   of the service
