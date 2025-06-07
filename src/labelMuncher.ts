@@ -5,9 +5,14 @@ import { JetstreamWatcher } from "./jetstreamWatcher.ts";
 
 export interface LabelMuncherOptions {
 	dbOptions: Database["opts"];
+	dataplaneOptions?: {
+		urls?: string[];
+		httpVersion?: "1.1" | "2";
+	};
 	jetstreamUrl?: string;
 	sqlitePath: string;
 	labelerDids: string[];
+	modServiceDid?: string;
 	plcUrl?: string;
 }
 
@@ -29,6 +34,9 @@ export class LabelMuncher {
 			db: this.db,
 			state: this.state,
 			plcUrl: options.plcUrl,
+			modServiceDid: options.modServiceDid,
+			dataplaneUrls: options.dataplaneOptions?.urls,
+			dataplaneHttpVersion: options.dataplaneOptions?.httpVersion || "1.1",
 		});
 		this.jetstreamWatcher = new JetstreamWatcher({
 			state: this.state,
@@ -59,6 +67,17 @@ export class LabelMuncher {
 			throw new Error("no labeler dids found in BSKY_LABELS_FROM_ISSUER_DIDS");
 		}
 
+		const modServiceDid = Deno.env.get("MOD_SERVICE_DID");
+
+		const dataplaneUrlsEnv = Deno.env.get("BSKY_DATAPLANE_URLS");
+		const dataplaneUrls = dataplaneUrlsEnv
+			? dataplaneUrlsEnv.split(",").map((url) => url.trim())
+			: undefined;
+		const dataplaneHttpVersion = Deno.env.get("BSKY_DATAPLANE_HTTP_VERSION") || "1.1";
+		if (dataplaneHttpVersion !== "1.1" && dataplaneHttpVersion !== "2") {
+			throw new Error("BSKY_DATAPLANE_HTTP_VERSION must be '1.1' or '2'");
+		}
+
 		const sqlitePath = Deno.env.get("DB_PATH") || "./muncher-state.sqlite";
 
 		return new LabelMuncher({
@@ -66,7 +85,12 @@ export class LabelMuncher {
 				url: dbUrl,
 				schema,
 			},
+			dataplaneOptions: {
+				urls: dataplaneUrls,
+				httpVersion: dataplaneHttpVersion,
+			},
 			labelerDids,
+			modServiceDid,
 			sqlitePath,
 		});
 	}

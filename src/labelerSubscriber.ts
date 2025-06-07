@@ -1,10 +1,16 @@
-import type { Database } from "@atproto/bsky";
+import {
+	BasicHostList,
+	createDataPlaneClient,
+	type Database,
+	type DataPlaneClient,
+} from "@atproto/bsky";
 import { decodeFirst } from "@atcute/cbor";
 import { LabelValidator, type LabelValidatorOptions } from "./labelValidator.ts";
 import { WebSocket } from "partysocket";
 import type { StateStore } from "./state.ts";
 import { type ComAtprotoLabelDefs, ComAtprotoLabelSubscribeLabels } from "@atcute/atproto";
 import { is } from "@atcute/lexicons";
+import { Timestamp } from "@bufbuild/protobuf";
 
 export interface LabelerSubscription {
 	did: string;
@@ -13,12 +19,17 @@ export interface LabelerSubscription {
 	isConnected: boolean;
 }
 
-export interface LabelerSubscriberOptions extends LabelValidatorOptions {}
+export interface LabelerSubscriberOptions extends LabelValidatorOptions {
+	modServiceDid?: string;
+	dataplaneUrls?: string[];
+	dataplaneHttpVersion?: "1.1" | "2";
+}
 
 export class LabelerSubscriber {
 	protected subscriptions = new Map<string, LabelerSubscription>();
 	protected state: StateStore;
 	protected db: Database;
+	protected dataplane?: DataPlaneClient;
 	protected validator: LabelValidator;
 	protected maxReconnectAttempts = 10;
 	protected reconnectDelay = 5000;
@@ -26,6 +37,11 @@ export class LabelerSubscriber {
 	constructor(options: LabelerSubscriberOptions) {
 		this.state = options.state;
 		this.db = options.db;
+		if (options.dataplaneUrls?.length) {
+			this.dataplane = createDataPlaneClient(new BasicHostList(options.dataplaneUrls), {
+				httpVersion: options.dataplaneHttpVersion || "1.1",
+			});
+		}
 		this.validator = new LabelValidator(options);
 	}
 
@@ -135,6 +151,9 @@ export class LabelerSubscriber {
 
 			for (const label of message.labels) {
 				await this.processLabel(label, did);
+				if (this.dataplane && label.val === "!takedown") {
+					await this.handleTakedown(label);
+				}
 			}
 		} catch (error) {
 			console.error(`error processing labels from ${did}:`, error);
@@ -163,6 +182,45 @@ export class LabelerSubscriber {
 			await this.db.db.insertInto("label").values(dbLabel).execute();
 		} catch (error) {
 			console.error(`error processing label:`, error);
+		}
+	}
+
+	protected async handleTakedown(label: ComAtprotoLabelDefs.Label) {
+		const { uri, neg, cts, src } = label;
+		const ref = `BSKY-TAKEDOWN-${cts.replaceAll(/[^[0-9a-zA-Z]/g, "")}`;
+		const now = new Date();
+		try {
+			if (uri.startsWith("did:")) {
+				if (!neg) {
+					await this.dataplane?.takedownActor({
+						did: uri,
+						ref,
+						seen: Timestamp.fromDate(now),
+					});
+				} else {
+					await this.dataplane?.untakedownActor({
+						did: uri,
+						seen: Timestamp.fromDate(now),
+					});
+				}
+			} else if (uri.startsWith("at://")) {
+				if (!neg) {
+					await this.dataplane?.takedownRecord({
+						recordUri: uri,
+						ref,
+						seen: Timestamp.fromDate(now),
+					});
+				} else {
+					await this.dataplane?.untakedownRecord({
+						recordUri: uri,
+						seen: Timestamp.fromDate(now),
+					});
+				}
+			} else {
+				throw "invalid subject";
+			}
+		} catch (error) {
+			console.error(`error processing takedown for ${uri} from ${src}:`, error);
 		}
 	}
 
@@ -236,7 +294,6 @@ export class LabelerSubscriber {
 			this.connectLabeler(subscription, reconnectUrl.toString());
 		}, this.reconnectDelay * subscription.reconnectAttempts);
 	}
-
 	close() {
 		for (const subscription of this.subscriptions.values()) {
 			if (subscription.ws) {

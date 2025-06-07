@@ -12,6 +12,7 @@
 		"@atcute/atproto": "npm:@atcute/atproto@^3.1.0",
 		"@atcute/lexicons": "npm:@atcute/lexicons@^1.0.4",
 		"@atproto/bsky": "npm:@atproto/bsky@^0.0.157",
+		"@bufbuild/protobuf": "npm:@bufbuild/protobuf@^1.5.0",
 		"@skyware/jetstream": "npm:@skyware/jetstream@^0.2.2",
 		"partysocket": "npm:partysocket@^1.1.4"
 	},
