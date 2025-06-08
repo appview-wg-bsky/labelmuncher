@@ -11,6 +11,7 @@ import type { DidCacheRecord, StateStore } from "./state.ts";
 import { is } from "@atcute/lexicons";
 import { AppBskyLabelerService } from "@atcute/bluesky";
 import type { ComAtprotoLabelDefs } from "@atcute/atproto";
+import type { ServiceCacheRecord } from "./state.ts";
 
 export interface ValidationResult {
 	valid: boolean;
@@ -27,6 +28,8 @@ export class LabelValidator {
 	protected idResolver: CompositeDidDocumentResolver<"plc" | "web">;
 	protected state: StateStore;
 	protected db: Database;
+	protected inFlight: Map<string, Promise<unknown>> = new Map();
+	protected cache = makeCache(60_000);
 
 	constructor({ plcUrl, state, db }: LabelValidatorOptions) {
 		this.idResolver = new CompositeDidDocumentResolver({
@@ -40,7 +43,7 @@ export class LabelValidator {
 	}
 
 	async validateLabel(label: ComAtprotoLabelDefs.Label, did: string): Promise<ValidationResult> {
-		for (const key of ["src", "uri", "val", "cts"] as const) {
+		for (const key of ["src", "uri", "val", "cts", "sig"] as const) {
 			if (!label?.[key]) {
 				return { valid: false, reason: "label is missing required field " + key };
 			}
@@ -50,11 +53,9 @@ export class LabelValidator {
 			return { valid: false, reason: "label source DID does not match provided DID" };
 		}
 
-		if (label.sig) {
-			const sigValid = await this.verifySignature(label);
-			if (!sigValid.valid) {
-				return sigValid;
-			}
+		const sigValid = await this.verifySignature(label);
+		if (!sigValid.valid) {
+			return sigValid;
 		}
 
 		const valValid = await this.validateLabelValue(label.src, label.val);
@@ -95,13 +96,10 @@ export class LabelValidator {
 			labelForSigning.cts = label.cts;
 			if (label.exp !== undefined) labelForSigning.exp = label.exp;
 
-			const cborBytes = encode(labelForSigning);
-			const hashBuffer = await crypto.subtle.digest("SHA-256", cborBytes);
-			const hashBytes = new Uint8Array(hashBuffer);
-
+			const labelBytes = encode(labelForSigning);
 			const sigBytes = fromBytes(label.sig);
 
-			const isSigValid = await verifySig(publicKey, sigBytes, hashBytes);
+			const isSigValid = await verifySig(publicKey, sigBytes, labelBytes);
 
 			if (!isSigValid) {
 				const refreshedKey = await this.getLabelerPubKey(label.src, true);
@@ -109,7 +107,7 @@ export class LabelValidator {
 					refreshedKey &&
 					!refreshedKey.publicKeyBytes.every((b, i) => b === publicKey.publicKeyBytes[i])
 				) {
-					const retryValid = await verifySig(refreshedKey, sigBytes, hashBytes);
+					const retryValid = await verifySig(refreshedKey, sigBytes, labelBytes);
 					if (!retryValid) {
 						return { valid: false, reason: "invalid signature after key refresh" };
 					}
@@ -144,9 +142,13 @@ export class LabelValidator {
 				}
 			}
 
-			const didDoc = await this.idResolver.resolve(did as `did:plc:${string}`, {
-				noCache: forceRefresh,
-			});
+			const didDoc = await this.fetch(
+				`${did}::id`,
+				() =>
+					this.idResolver.resolve(did as `did:plc:${string}`, {
+						noCache: forceRefresh,
+					}),
+			);
 			if (!didDoc) {
 				return null;
 			}
@@ -196,13 +198,7 @@ export class LabelValidator {
 					return { valid: false, reason: "could not fetch labeler service record" };
 				}
 
-				validValues = serviceRecord.policies.labelValues || [];
-
-				this.state.setServiceCache({
-					did,
-					labelValues: validValues,
-					cachedAt: Date.now(),
-				});
+				validValues = serviceRecord.labelValues || [];
 			}
 
 			if (!validValues.includes(val)) {
@@ -220,9 +216,12 @@ export class LabelValidator {
 		}
 	}
 
-	protected async fetchServiceRecord(did: string): Promise<AppBskyLabelerService.Main | null> {
+	protected async fetchServiceRecord(did: string): Promise<ServiceCacheRecord | null> {
 		try {
-			const didData = await this.idResolver.resolve(did as `did:plc:${string}`);
+			const didData = await this.fetch(
+				`${did}::id`,
+				() => this.idResolver.resolve(did as `did:plc:${string}`),
+			);
 			const pds = didData.service?.find(
 				(service) => service.id.endsWith("#atproto_pds"),
 			)?.serviceEndpoint;
@@ -234,13 +233,17 @@ export class LabelValidator {
 				handler: simpleFetchHandler({ service: pds }),
 			});
 
-			const response = await client.get("com.atproto.repo.getRecord", {
-				params: {
-					repo: did as `did:plc:${string}`,
-					collection: "app.bsky.labeler.service",
-					rkey: "self",
-				},
-			});
+			const response = await this.fetch(
+				`${did}::service`,
+				() =>
+					client.get("com.atproto.repo.getRecord", {
+						params: {
+							repo: did as `did:plc:${string}`,
+							collection: "app.bsky.labeler.service",
+							rkey: "self",
+						},
+					}),
+			);
 
 			if (!response.ok) {
 				console.error(`failed to fetch service record for ${did}:`, response.data.error);
@@ -252,10 +255,55 @@ export class LabelValidator {
 				return null;
 			}
 
-			return response.data.value;
+			const data = {
+				did,
+				labelValues: response.data.value.policies.labelValues || [],
+				cachedAt: Date.now(),
+			};
+			this.state.setServiceCache(data);
+			return data;
 		} catch (error) {
 			console.error(`error fetching service record for ${did}:`, error);
 			return null;
 		}
 	}
+
+	protected async fetch<T>(key: string, fn: () => Promise<T>): Promise<T> {
+		if (this.inFlight.has(key)) {
+			return this.inFlight.get(key) as Promise<T>;
+		}
+
+		if (this.cache.get(key)) {
+			return this.cache.get(key) as T;
+		}
+
+		const promise = fn();
+		this.inFlight.set(key, promise);
+
+		try {
+			console.log(`start ${key}`);
+			return this.cache.set(key, await promise);
+		} finally {
+			console.log(`end ${key}`);
+			this.inFlight.delete(key);
+		}
+	}
 }
+
+const makeCache = (ttlMs: number) => {
+	const cache = new Map<string, { value: unknown; expires: number }>();
+
+	return {
+		get: (key: string): unknown => {
+			const entry = cache.get(key);
+			if (entry && entry.expires > Date.now()) {
+				return entry.value;
+			}
+			return null;
+		},
+		set: <T>(key: string, value: T): T => {
+			cache.set(key, { value, expires: Date.now() + ttlMs });
+			return value;
+		},
+	};
+};
