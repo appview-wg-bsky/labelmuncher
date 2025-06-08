@@ -107,6 +107,8 @@ export class LabelMuncher {
 		console.log("starting label muncher");
 
 		try {
+			this.state.init();
+
 			console.log("starting jetstream watcher");
 			this.jetstreamWatcher.start();
 
