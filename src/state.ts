@@ -69,8 +69,25 @@ export class StateStore {
 	getDidCache(did: string): DidCacheRecord | null {
 		const result = this.db
 			.prepare("SELECT * FROM did_cache WHERE did = ?")
-			.get(did);
-		return result as unknown as DidCacheRecord ?? null;
+			.get(did) as unknown as DidCacheRecord;
+
+		if (!result) return null;
+
+		const now = Date.now();
+		const cacheAge = now - result.cached_at;
+		const twentyFourHours = 24 * 60 * 60 * 1000;
+
+		if (cacheAge > twentyFourHours) {
+			this.db.prepare("DELETE FROM did_cache WHERE did = ?").run(did);
+			return null;
+		}
+
+		return {
+			did: result.did,
+			service_endpoint: result.service_endpoint,
+			public_key: result.public_key,
+			cached_at: result.cached_at,
+		};
 	}
 
 	setDidCache(record: DidCacheRecord) {

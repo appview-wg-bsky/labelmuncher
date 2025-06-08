@@ -7,7 +7,7 @@ import {
 import { Client, simpleFetchHandler } from "@atcute/client";
 import type { Database } from "@atproto/bsky";
 import { verifySigWithDidKey } from "@atcute/crypto";
-import type { StateStore } from "./state.ts";
+import type { DidCacheRecord, StateStore } from "./state.ts";
 import { is } from "@atcute/lexicons";
 import { AppBskyLabelerService } from "@atcute/bluesky";
 import type { ComAtprotoLabelDefs } from "@atcute/atproto";
@@ -73,7 +73,7 @@ export class LabelValidator {
 		return { valid: true };
 	}
 
-	private async verifySignature(label: ComAtprotoLabelDefs.Label): Promise<ValidationResult> {
+	async verifySignature(label: ComAtprotoLabelDefs.Label): Promise<ValidationResult> {
 		if (!label.sig) {
 			return { valid: false, reason: "no signature present" };
 		}
@@ -126,12 +126,16 @@ export class LabelValidator {
 		}
 	}
 
-	private async getLabelerDidKey(did: string, forceRefresh = false): Promise<string | null> {
+	async getLabelerDidKey(did: string, forceRefresh = false): Promise<string | null> {
+		return (await this.fetchDidData(did, forceRefresh))?.public_key ?? null;
+	}
+
+	async fetchDidData(did: string, forceRefresh = false): Promise<DidCacheRecord | null> {
 		try {
 			if (!forceRefresh) {
 				const cached = this.state.getDidCache(did);
 				if (cached) {
-					return cached.public_key;
+					return cached;
 				}
 			}
 
@@ -158,21 +162,23 @@ export class LabelValidator {
 				return null;
 			}
 
-			this.state.setDidCache({
+			const didData: DidCacheRecord = {
 				did,
 				public_key: labelKey.publicKeyMultibase,
 				service_endpoint: labelerService,
 				cached_at: Date.now(),
-			});
+			};
 
-			return labelKey.publicKeyMultibase;
+			this.state.setDidCache(didData);
+
+			return didData;
 		} catch (error) {
 			console.error(`error resolving DID ${did}:`, error);
 			return null;
 		}
 	}
 
-	private async validateLabelValue(did: string, val: string): Promise<ValidationResult> {
+	protected async validateLabelValue(did: string, val: string): Promise<ValidationResult> {
 		try {
 			const cached = this.state.getServiceCache(did);
 			let validValues: string[];
@@ -209,9 +215,8 @@ export class LabelValidator {
 		}
 	}
 
-	private async fetchServiceRecord(did: string): Promise<AppBskyLabelerService.Main | null> {
+	protected async fetchServiceRecord(did: string): Promise<AppBskyLabelerService.Main | null> {
 		try {
-			// Get PDS from DID document
 			const didData = await this.idResolver.resolve(did as `did:plc:${string}`);
 			const pds = didData.service?.find(
 				(service) => service.id.endsWith("#atproto_pds"),

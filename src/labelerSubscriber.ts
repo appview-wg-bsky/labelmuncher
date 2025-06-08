@@ -53,31 +53,15 @@ export class LabelerSubscriber {
 
 	protected async subscribeToLabeler(did: string) {
 		try {
-			const didCache = this.state.getDidCache(did);
-			let serviceEndpoint: string;
-
-			if (didCache) {
-				serviceEndpoint = didCache.service_endpoint;
-			} else {
-				// This will update the DID cache before failing
-				await this.validator.validateLabel({
-					src: did as `did:plc:${string}`,
-					uri: "at://dummy",
-					val: "dummy",
-					cts: new Date().toISOString(),
-				}, did);
-
-				const cached = this.state.getDidCache(did);
-				if (!cached) {
-					console.error(`failed to resolve service endpoint for ${did}`);
-					return;
-				}
-				serviceEndpoint = cached.service_endpoint;
+			const didData = await this.validator.fetchDidData(did);
+			if (!didData?.service_endpoint) {
+				console.warn(`no service endpoint found for labeler ${did}`);
+				return;
 			}
 
 			const cursor = this.state.getCursor(did) || 0;
 
-			const url = new URL("/xrpc/com.atproto.label.subscribeLabels", serviceEndpoint);
+			const url = new URL("/xrpc/com.atproto.label.subscribeLabels", didData.service_endpoint);
 			url.searchParams.set("cursor", cursor.toString());
 
 			const subscription: LabelerSubscription = {
