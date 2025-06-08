@@ -6,7 +6,7 @@ import {
 } from "@atcute/identity-resolver";
 import { Client, simpleFetchHandler } from "@atcute/client";
 import type { Database } from "@atproto/bsky";
-import { verifySigWithDidKey } from "@atcute/crypto";
+import { type FoundPublicKey, parsePublicMultikey, verifySig } from "@atcute/crypto";
 import type { DidCacheRecord, StateStore } from "./state.ts";
 import { is } from "@atcute/lexicons";
 import { AppBskyLabelerService } from "@atcute/bluesky";
@@ -79,7 +79,7 @@ export class LabelValidator {
 		}
 
 		try {
-			const publicKey = await this.getLabelerDidKey(label.src);
+			const publicKey = await this.getLabelerPubKey(label.src);
 			if (!publicKey) {
 				return { valid: false, reason: `could not resolve labeler ${label.src} public key` };
 			}
@@ -101,12 +101,15 @@ export class LabelValidator {
 
 			const sigBytes = fromBytes(label.sig);
 
-			const isSigValid = await verifySigWithDidKey(publicKey, sigBytes, hashBytes);
+			const isSigValid = await verifySig(publicKey, sigBytes, hashBytes);
 
 			if (!isSigValid) {
-				const refreshedKey = await this.getLabelerDidKey(label.src, true);
-				if (refreshedKey && refreshedKey !== publicKey) {
-					const retryValid = await verifySigWithDidKey(refreshedKey, sigBytes, hashBytes);
+				const refreshedKey = await this.getLabelerPubKey(label.src, true);
+				if (
+					refreshedKey &&
+					!refreshedKey.publicKeyBytes.every((b, i) => b === publicKey.publicKeyBytes[i])
+				) {
+					const retryValid = await verifySig(refreshedKey, sigBytes, hashBytes);
 					if (!retryValid) {
 						return { valid: false, reason: "invalid signature after key refresh" };
 					}
@@ -126,11 +129,13 @@ export class LabelValidator {
 		}
 	}
 
-	async getLabelerDidKey(did: string, forceRefresh = false): Promise<string | null> {
-		return (await this.fetchDidData(did, forceRefresh))?.publicKey ?? null;
+	async getLabelerPubKey(did: string, forceRefresh = false): Promise<FoundPublicKey | null> {
+		const publicKey = (await this.fetchLabelerDidData(did, forceRefresh))?.publicKey;
+		if (!publicKey) return null;
+		return parsePublicMultikey(publicKey);
 	}
 
-	async fetchDidData(did: string, forceRefresh = false): Promise<DidCacheRecord | null> {
+	async fetchLabelerDidData(did: string, forceRefresh = false): Promise<DidCacheRecord | null> {
 		try {
 			if (!forceRefresh) {
 				const cached = this.state.getDidCache(did);

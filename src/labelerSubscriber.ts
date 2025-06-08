@@ -53,15 +53,15 @@ export class LabelerSubscriber {
 
 	protected async subscribeToLabeler(did: string) {
 		try {
-			const didData = await this.validator.fetchDidData(did);
-			if (!didData?.service_endpoint) {
+			const didData = await this.validator.fetchLabelerDidData(did);
+			if (!didData?.serviceEndpoint) {
 				console.warn(`no service endpoint found for labeler ${did}`);
 				return;
 			}
 
 			const cursor = this.state.getCursor(did) || 0;
 
-			const url = new URL("/xrpc/com.atproto.label.subscribeLabels", didData.service_endpoint);
+			const url = new URL("/xrpc/com.atproto.label.subscribeLabels", didData.serviceEndpoint);
 			url.searchParams.set("cursor", cursor.toString());
 
 			const subscription: LabelerSubscription = {
@@ -226,7 +226,7 @@ export class LabelerSubscriber {
 			}
 
 			const message = {
-				$type: `com.atproto.sync.subscribeLabels${t}`,
+				$type: `com.atproto.label.subscribeLabels${t}`,
 				...body,
 			};
 

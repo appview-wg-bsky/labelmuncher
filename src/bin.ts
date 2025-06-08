@@ -13,23 +13,6 @@ async function main() {
 		Deno.exit(1);
 	}
 
-	const shutdown = async (signal: string) => {
-		console.log(`received ${signal}, shutting down`);
-		try {
-			await service.stop();
-			Deno.exit(0);
-		} catch (error) {
-			console.error(
-				"error during shutdown:",
-				error,
-			);
-			Deno.exit(1);
-		}
-	};
-
-	Deno.addSignalListener("SIGINT", () => shutdown("SIGINT"));
-	Deno.addSignalListener("SIGTERM", () => shutdown("SIGTERM"));
-
 	try {
 		await service.start();
 	} catch (error) {
