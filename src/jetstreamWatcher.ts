@@ -50,8 +50,8 @@ export class JetstreamWatcher {
 			if (cached) {
 				this.state.setServiceCache({
 					did,
-					label_values: [],
-					cached_at: 0, // Force expiry
+					labelValues: [],
+					cachedAt: 0, // Force expiry
 				});
 			}
 		} catch (error) {

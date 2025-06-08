@@ -127,7 +127,7 @@ export class LabelValidator {
 	}
 
 	async getLabelerDidKey(did: string, forceRefresh = false): Promise<string | null> {
-		return (await this.fetchDidData(did, forceRefresh))?.public_key ?? null;
+		return (await this.fetchDidData(did, forceRefresh))?.publicKey ?? null;
 	}
 
 	async fetchDidData(did: string, forceRefresh = false): Promise<DidCacheRecord | null> {
@@ -164,9 +164,9 @@ export class LabelValidator {
 
 			const didData: DidCacheRecord = {
 				did,
-				public_key: labelKey.publicKeyMultibase,
-				service_endpoint: labelerService,
-				cached_at: Date.now(),
+				publicKey: labelKey.publicKeyMultibase,
+				serviceEndpoint: labelerService,
+				cachedAt: Date.now(),
 			};
 
 			this.state.setDidCache(didData);
@@ -184,7 +184,7 @@ export class LabelValidator {
 			let validValues: string[];
 
 			if (cached) {
-				validValues = cached.label_values;
+				validValues = cached.labelValues;
 			} else {
 				const serviceRecord = await this.fetchServiceRecord(did);
 				if (!serviceRecord) {
@@ -195,8 +195,8 @@ export class LabelValidator {
 
 				this.state.setServiceCache({
 					did,
-					label_values: validValues,
-					cached_at: Date.now(),
+					labelValues: validValues,
+					cachedAt: Date.now(),
 				});
 			}
 

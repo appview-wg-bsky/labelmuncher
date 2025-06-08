@@ -7,15 +7,15 @@ export interface CursorRecord {
 
 export interface DidCacheRecord {
 	did: string;
-	service_endpoint: string;
-	public_key: string;
-	cached_at: number;
+	serviceEndpoint: string;
+	publicKey: string;
+	cachedAt: number;
 }
 
 export interface ServiceCacheRecord {
 	did: string;
-	label_values: string[];
-	cached_at: number;
+	labelValues: string[];
+	cachedAt: number;
 }
 
 export type Serialized<T> = {
@@ -39,16 +39,16 @@ export class StateStore {
 		this.db.exec(`
       CREATE TABLE IF NOT EXISTS did_cache (
         did TEXT PRIMARY KEY,
-        service_endpoint TEXT NOT NULL,
-        public_key TEXT NOT NULL,
-        cached_at INTEGER NOT NULL
+        serviceEndpoint TEXT NOT NULL,
+        publicKey TEXT NOT NULL,
+        cachedAt INTEGER NOT NULL
       )
     `);
 		this.db.exec(`
       CREATE TABLE IF NOT EXISTS service_cache (
         did TEXT PRIMARY KEY,
-        label_values TEXT NOT NULL,
-        cached_at INTEGER NOT NULL
+        labelValues TEXT NOT NULL,
+        cachedAt INTEGER NOT NULL
       )
     `);
 	}
@@ -74,7 +74,7 @@ export class StateStore {
 		if (!result) return null;
 
 		const now = Date.now();
-		const cacheAge = now - result.cached_at;
+		const cacheAge = now - result.cachedAt;
 		const twentyFourHours = 24 * 60 * 60 * 1000;
 
 		if (cacheAge > twentyFourHours) {
@@ -84,9 +84,9 @@ export class StateStore {
 
 		return {
 			did: result.did,
-			service_endpoint: result.service_endpoint,
-			public_key: result.public_key,
-			cached_at: result.cached_at,
+			serviceEndpoint: result.serviceEndpoint,
+			publicKey: result.publicKey,
+			cachedAt: result.cachedAt,
 		};
 	}
 
@@ -94,15 +94,15 @@ export class StateStore {
 		this.db
 			.prepare(
 				`
-      INSERT OR REPLACE INTO did_cache (did, service_endpoint, public_key, cached_at)
+      INSERT OR REPLACE INTO did_cache (did, serviceEndpoint, publicKey, cachedAt)
       VALUES (?, ?, ?, ?)
     `,
 			)
 			.run(
 				record.did,
-				record.service_endpoint,
-				record.public_key,
-				record.cached_at,
+				record.serviceEndpoint,
+				record.publicKey,
+				record.cachedAt,
 			);
 	}
 
@@ -113,7 +113,7 @@ export class StateStore {
 		if (!result) return null;
 
 		const now = Date.now();
-		const cacheAge = now - result.cached_at;
+		const cacheAge = now - result.cachedAt;
 		const twentyFourHours = 24 * 60 * 60 * 1000;
 
 		if (cacheAge > twentyFourHours) {
@@ -123,8 +123,8 @@ export class StateStore {
 
 		return {
 			did: result.did,
-			label_values: JSON.parse(result.label_values),
-			cached_at: result.cached_at,
+			labelValues: JSON.parse(result.labelValues),
+			cachedAt: result.cachedAt,
 		};
 	}
 
@@ -132,11 +132,11 @@ export class StateStore {
 		this.db
 			.prepare(
 				`
-      INSERT OR REPLACE INTO service_cache (did, label_values, cached_at)
+      INSERT OR REPLACE INTO service_cache (did, labelValues, cachedAt)
       VALUES (?, ?, ?)
     `,
 			)
-			.run(record.did, JSON.stringify(record.label_values), record.cached_at);
+			.run(record.did, JSON.stringify(record.labelValues), record.cachedAt);
 	}
 
 	close() {
