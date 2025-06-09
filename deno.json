@@ -10,14 +10,14 @@
 		"@atcute/client": "npm:@atcute/client@^4.0.3",
 		"@atcute/bluesky": "npm:@atcute/bluesky@^3.1.1",
 		"@atcute/atproto": "npm:@atcute/atproto@^3.1.0",
+		"@atcute/jetstream": "npm:@atcute/jetstream@^1.0.2",
 		"@atcute/lexicons": "npm:@atcute/lexicons@^1.0.4",
 		"@atproto/bsky": "npm:@atproto/bsky@^0.0.157",
 		"@bufbuild/protobuf": "npm:@bufbuild/protobuf@^1.5.0",
-		"@skyware/jetstream": "npm:@skyware/jetstream@^0.2.2",
 		"partysocket": "npm:partysocket@^1.1.4"
 	},
 	"tasks": {
-		"start": "deno run --allow-all src/bin.ts"
+		"start": "deno run --allow-all --env-file src/bin.ts"
 	},
 	"fmt": {
 		"useTabs": true,

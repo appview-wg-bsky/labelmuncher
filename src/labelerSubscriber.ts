@@ -26,11 +26,11 @@ export interface LabelerSubscriberOptions extends LabelValidatorOptions {
 }
 
 export class LabelerSubscriber {
+	validator: LabelValidator;
 	protected subscriptions = new Map<string, LabelerSubscription>();
 	protected state: StateStore;
 	protected db: Database;
 	protected dataplane?: DataPlaneClient;
-	protected validator: LabelValidator;
 	protected maxReconnectAttempts = 10;
 	protected reconnectDelay = 5000;
 
@@ -53,13 +53,14 @@ export class LabelerSubscriber {
 
 	protected async subscribeToLabeler(did: string) {
 		try {
-			const didData = await this.validator.fetchLabelerDidData(did);
+			const didData = await this.validator.fetchDidDocument(did);
 			if (!didData?.serviceEndpoint) {
 				console.warn(`no service endpoint found for labeler ${did}`);
 				return;
 			}
 
 			const cursor = this.state.getCursor(did) || 0;
+			if (cursor === 0) console.log(`starting from the beginning for ${did}`);
 
 			const url = new URL("/xrpc/com.atproto.label.subscribeLabels", didData.serviceEndpoint);
 			url.searchParams.set("cursor", cursor.toString());

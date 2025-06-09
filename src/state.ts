@@ -56,8 +56,8 @@ export class StateStore {
 	getCursor(did: string): number | null {
 		const result = this.db
 			.prepare("SELECT cursor FROM cursors WHERE did = ?")
-			.get(did);
-		return result ? result.cursor as number : null;
+			.get(did) as { cursor: number };
+		return result ? result.cursor : null;
 	}
 
 	setCursor(did: string, cursor: number) {
@@ -67,27 +67,9 @@ export class StateStore {
 	}
 
 	getDidCache(did: string): DidCacheRecord | null {
-		const result = this.db
+		return this.db
 			.prepare("SELECT * FROM did_cache WHERE did = ?")
-			.get(did) as unknown as DidCacheRecord;
-
-		if (!result) return null;
-
-		const now = Date.now();
-		const cacheAge = now - result.cachedAt;
-		const twentyFourHours = 24 * 60 * 60 * 1000;
-
-		if (cacheAge > twentyFourHours) {
-			this.db.prepare("DELETE FROM did_cache WHERE did = ?").run(did);
-			return null;
-		}
-
-		return {
-			did: result.did,
-			serviceEndpoint: result.serviceEndpoint,
-			publicKey: result.publicKey,
-			cachedAt: result.cachedAt,
-		};
+			.get(did) as Serialized<DidCacheRecord> ?? null;
 	}
 
 	setDidCache(record: DidCacheRecord) {
@@ -109,17 +91,8 @@ export class StateStore {
 	getServiceCache(did: string): ServiceCacheRecord | null {
 		const result = this.db
 			.prepare("SELECT * FROM service_cache WHERE did = ?")
-			.get(did) as unknown as Serialized<ServiceCacheRecord>;
+			.get(did) as Serialized<ServiceCacheRecord>;
 		if (!result) return null;
-
-		const now = Date.now();
-		const cacheAge = now - result.cachedAt;
-		const twentyFourHours = 24 * 60 * 60 * 1000;
-
-		if (cacheAge > twentyFourHours) {
-			this.db.prepare("DELETE FROM service_cache WHERE did = ?").run(did);
-			return null;
-		}
 
 		return {
 			did: result.did,

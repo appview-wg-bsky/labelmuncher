@@ -1,5 +1,5 @@
-import { Jetstream } from "@skyware/jetstream";
-import { StateStore } from "./state.ts";
+import { JetstreamSubscription } from "@atcute/jetstream";
+import type { StateStore } from "./state.ts";
 
 export interface JetstreamWatcherOptions {
 	endpoint?: string;
@@ -8,38 +8,33 @@ export interface JetstreamWatcherOptions {
 }
 
 export class JetstreamWatcher {
-	protected jetstream: Jetstream;
+	protected jetstream: JetstreamSubscription;
 	protected state: StateStore;
 	protected wantedDids: Set<string>;
+	protected controller = new AbortController();
 
 	constructor({ endpoint, wantedDids, state }: JetstreamWatcherOptions) {
 		this.state = state;
 		this.wantedDids = new Set(wantedDids);
-		this.jetstream = new Jetstream({
-			endpoint,
+		this.jetstream = new JetstreamSubscription({
+			url: endpoint ?? "wss://jetstream1.us-east.bsky.network/subscribe",
 			wantedCollections: ["app.bsky.labeler.service"],
-			wantedDids: [...this.wantedDids],
+			wantedDids: [...(this.wantedDids as Set<`did:plc:${string}`>)],
 		});
 	}
 
-	start() {
-		this.jetstream.on("open", () => {
-			console.log("connected to jetstream");
-		});
-
-		this.jetstream.on("close", () => {
-			console.log("disconnected from jetstream");
-		});
-
-		this.jetstream.on("error", (error) => {
-			console.error("jetstream error:", error);
-		});
-
-		this.jetstream.on("commit", (commit) => {
-			if (this.wantedDids.has(commit.did)) this.handleServiceRecordChange(commit.did);
-		});
-
-		this.jetstream.start();
+	async start() {
+		for await (const evt of this.jetstream) {
+			if (
+				this.wantedDids.has(evt.did) &&
+				evt.kind === "commit" &&
+				(evt.commit.operation === "update" ||
+					evt.commit.operation === "create") &&
+				!this.controller.signal.aborted
+			) {
+				this.handleServiceRecordChange(evt.did);
+			}
+		}
 	}
 
 	protected handleServiceRecordChange(did: string) {
@@ -60,6 +55,6 @@ export class JetstreamWatcher {
 	}
 
 	close() {
-		this.jetstream.close();
+		this.controller.abort();
 	}
 }

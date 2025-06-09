@@ -13,6 +13,8 @@ import { AppBskyLabelerService } from "@atcute/bluesky";
 import type { ComAtprotoLabelDefs } from "@atcute/atproto";
 import type { ServiceCacheRecord } from "./state.ts";
 
+export const GLOBAL_LABEL_VALUES = ["porn", "sexual", "nudity", "graphic-media", "gore"];
+
 export interface ValidationResult {
 	valid: boolean;
 	reason?: string;
@@ -28,13 +30,13 @@ export class LabelValidator {
 	protected idResolver: CompositeDidDocumentResolver<"plc" | "web">;
 	protected state: StateStore;
 	protected db: Database;
-	protected inFlight: Map<string, Promise<unknown>> = new Map();
-	protected cache = makeCache(60_000);
 
 	constructor({ plcUrl, state, db }: LabelValidatorOptions) {
 		this.idResolver = new CompositeDidDocumentResolver({
 			methods: {
-				plc: new PlcDidDocumentResolver({ apiUrl: plcUrl ?? "https://plc.directory" }),
+				plc: new PlcDidDocumentResolver({
+					apiUrl: plcUrl ?? "https://plc.directory",
+				}),
 				web: new WebDidDocumentResolver(),
 			},
 		});
@@ -58,7 +60,7 @@ export class LabelValidator {
 			return sigValid;
 		}
 
-		const valValid = await this.validateLabelValue(label.src, label.val);
+		const valValid = this.validateLabelValue(label.src, label.val);
 		if (!valValid.valid) {
 			return valValid;
 		}
@@ -80,7 +82,7 @@ export class LabelValidator {
 		}
 
 		try {
-			const publicKey = await this.getLabelerPubKey(label.src);
+			const publicKey = this.getLabelerPubKey(label.src);
 			if (!publicKey) {
 				return { valid: false, reason: `could not resolve labeler ${label.src} public key` };
 			}
@@ -102,7 +104,7 @@ export class LabelValidator {
 			const isSigValid = await verifySig(publicKey, sigBytes, labelBytes);
 
 			if (!isSigValid) {
-				const refreshedKey = await this.getLabelerPubKey(label.src, true);
+				const refreshedKey = this.getLabelerPubKey(label.src);
 				if (
 					refreshedKey &&
 					!refreshedKey.publicKeyBytes.every((b, i) => b === publicKey.publicKeyBytes[i])
@@ -127,28 +129,28 @@ export class LabelValidator {
 		}
 	}
 
-	async getLabelerPubKey(did: string, forceRefresh = false): Promise<FoundPublicKey | null> {
-		const publicKey = (await this.fetchLabelerDidData(did, forceRefresh))?.publicKey;
+	validateLabelValue(did: string, val: string): ValidationResult {
+		const { labelValues } = this.state.getServiceCache(did) ?? {};
+		if (!labelValues) {
+			return { valid: false, reason: "no label values found in service record cache" };
+		}
+
+		if (!labelValues.includes(val) && !GLOBAL_LABEL_VALUES.includes(val)) {
+			return { valid: false, reason: `label value '${val}' not in labeler's declared values` };
+		}
+
+		return { valid: true };
+	}
+
+	getLabelerPubKey(did: string): FoundPublicKey | null {
+		const publicKey = (this.state.getDidCache(did))?.publicKey;
 		if (!publicKey) return null;
 		return parsePublicMultikey(publicKey);
 	}
 
-	async fetchLabelerDidData(did: string, forceRefresh = false): Promise<DidCacheRecord | null> {
+	async fetchDidDocument(did: string): Promise<DidCacheRecord | null> {
 		try {
-			if (!forceRefresh) {
-				const cached = this.state.getDidCache(did);
-				if (cached) {
-					return cached;
-				}
-			}
-
-			const didDoc = await this.fetch(
-				`${did}::id`,
-				() =>
-					this.idResolver.resolve(did as `did:plc:${string}`, {
-						noCache: forceRefresh,
-					}),
-			);
+			const didDoc = await this.idResolver.resolve(did as `did:plc:${string}`, { noCache: true });
 			if (!didDoc) {
 				return null;
 			}
@@ -175,9 +177,7 @@ export class LabelValidator {
 				serviceEndpoint: labelerService,
 				cachedAt: Date.now(),
 			};
-
 			this.state.setDidCache(didData);
-
 			return didData;
 		} catch (error) {
 			console.error(`error resolving DID ${did}:`, error);
@@ -185,43 +185,9 @@ export class LabelValidator {
 		}
 	}
 
-	protected async validateLabelValue(did: string, val: string): Promise<ValidationResult> {
+	async fetchServiceRecord(did: string): Promise<ServiceCacheRecord | null> {
 		try {
-			const cached = this.state.getServiceCache(did);
-			let validValues: string[];
-
-			if (cached) {
-				validValues = cached.labelValues;
-			} else {
-				const serviceRecord = await this.fetchServiceRecord(did);
-				if (!serviceRecord) {
-					return { valid: false, reason: "could not fetch labeler service record" };
-				}
-
-				validValues = serviceRecord.labelValues || [];
-			}
-
-			if (!validValues.includes(val)) {
-				return { valid: false, reason: `label value '${val}' not in labeler's declared values` };
-			}
-
-			return { valid: true };
-		} catch (error) {
-			return {
-				valid: false,
-				reason: `error validating label value: ${
-					error instanceof Error ? error.message : String(error)
-				}`,
-			};
-		}
-	}
-
-	protected async fetchServiceRecord(did: string): Promise<ServiceCacheRecord | null> {
-		try {
-			const didData = await this.fetch(
-				`${did}::id`,
-				() => this.idResolver.resolve(did as `did:plc:${string}`),
-			);
+			const didData = await this.idResolver.resolve(did as `did:plc:${string}`, { noCache: true });
 			const pds = didData.service?.find(
 				(service) => service.id.endsWith("#atproto_pds"),
 			)?.serviceEndpoint;
@@ -233,17 +199,13 @@ export class LabelValidator {
 				handler: simpleFetchHandler({ service: pds }),
 			});
 
-			const response = await this.fetch(
-				`${did}::service`,
-				() =>
-					client.get("com.atproto.repo.getRecord", {
-						params: {
-							repo: did as `did:plc:${string}`,
-							collection: "app.bsky.labeler.service",
-							rkey: "self",
-						},
-					}),
-			);
+			const response = await client.get("com.atproto.repo.getRecord", {
+				params: {
+					repo: did as `did:plc:${string}`,
+					collection: "app.bsky.labeler.service",
+					rkey: "self",
+				},
+			});
 
 			if (!response.ok) {
 				console.error(`failed to fetch service record for ${did}:`, response.data.error);
@@ -267,43 +229,4 @@ export class LabelValidator {
 			return null;
 		}
 	}
-
-	protected async fetch<T>(key: string, fn: () => Promise<T>): Promise<T> {
-		if (this.inFlight.has(key)) {
-			return this.inFlight.get(key) as Promise<T>;
-		}
-
-		if (this.cache.get(key)) {
-			return this.cache.get(key) as T;
-		}
-
-		const promise = fn();
-		this.inFlight.set(key, promise);
-
-		try {
-			console.log(`start ${key}`);
-			return this.cache.set(key, await promise);
-		} finally {
-			console.log(`end ${key}`);
-			this.inFlight.delete(key);
-		}
-	}
 }
-
-const makeCache = (ttlMs: number) => {
-	const cache = new Map<string, { value: unknown; expires: number }>();
-
-	return {
-		get: (key: string): unknown => {
-			const entry = cache.get(key);
-			if (entry && entry.expires > Date.now()) {
-				return entry.value;
-			}
-			return null;
-		},
-		set: <T>(key: string, value: T): T => {
-			cache.set(key, { value, expires: Date.now() + ttlMs });
-			return value;
-		},
-	};
-};

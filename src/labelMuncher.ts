@@ -46,17 +46,17 @@ export class LabelMuncher {
 	}
 
 	static fromEnvironment(): LabelMuncher {
-		const dbUrl = Deno.env.get("BSKY_DB_POSTGRES_URL");
+		const dbUrl = process.env.BSKY_DB_POSTGRES_URL;
 		if (!dbUrl) {
 			throw new Error("BSKY_DB_POSTGRES_URL environment variable is required");
 		}
 
-		const schema = Deno.env.get("BSKY_DB_POSTGRES_SCHEMA") || "bsky";
+		const schema = process.env.BSKY_DB_POSTGRES_SCHEMA || "bsky";
 
-		const plcUrl = Deno.env.get("BSKY_DID_PLC_URL") || Deno.env.get("DID_PLC_URL") ||
+		const plcUrl = process.env.BSKY_DID_PLC_URL || process.env.DID_PLC_URL ||
 			"https://plc.directory";
 
-		const labelerDidsEnv = Deno.env.get("BSKY_LABELS_FROM_ISSUER_DIDS");
+		const labelerDidsEnv = process.env.BSKY_LABELS_FROM_ISSUER_DIDS;
 		if (!labelerDidsEnv) {
 			throw new Error("BSKY_LABELS_FROM_ISSUER_DIDS environment variable is required");
 		}
@@ -70,18 +70,18 @@ export class LabelMuncher {
 			throw new Error("no labeler dids found in BSKY_LABELS_FROM_ISSUER_DIDS");
 		}
 
-		const modServiceDid = Deno.env.get("MOD_SERVICE_DID");
+		const modServiceDid = process.env.MOD_SERVICE_DID;
 
-		const dataplaneUrlsEnv = Deno.env.get("BSKY_DATAPLANE_URLS");
+		const dataplaneUrlsEnv = process.env.BSKY_DATAPLANE_URLS;
 		const dataplaneUrls = dataplaneUrlsEnv
 			? dataplaneUrlsEnv.split(",").map((url) => url.trim())
 			: undefined;
-		const dataplaneHttpVersion = Deno.env.get("BSKY_DATAPLANE_HTTP_VERSION") || "1.1";
+		const dataplaneHttpVersion = process.env.BSKY_DATAPLANE_HTTP_VERSION || "1.1";
 		if (dataplaneHttpVersion !== "1.1" && dataplaneHttpVersion !== "2") {
 			throw new Error("BSKY_DATAPLANE_HTTP_VERSION must be '1.1' or '2'");
 		}
 
-		const sqlitePath = Deno.env.get("DB_PATH") || "./muncher-state.sqlite";
+		const sqlitePath = process.env.DB_PATH || "./muncher-state.sqlite";
 
 		return new LabelMuncher({
 			dbOptions: {
@@ -109,8 +109,18 @@ export class LabelMuncher {
 		try {
 			this.state.init();
 
+			console.log("caching labeler metadata");
+			for (const labeler of this.options.labelerDids) {
+				if (
+					!await this.subscriber.validator.fetchDidDocument(labeler) ||
+					!await this.subscriber.validator.fetchServiceRecord(labeler)
+				) {
+					console.error(`failed to fetch did document or service record for labeler ${labeler}`);
+				}
+			}
+
 			console.log("starting jetstream watcher");
-			this.jetstreamWatcher.start();
+			void this.jetstreamWatcher.start();
 
 			console.log(`subscribing to ${this.options.labelerDids.length} labelers`);
 			await this.subscriber.subscribeToLabelers(this.options.labelerDids);
